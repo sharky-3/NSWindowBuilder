@@ -6,6 +6,7 @@ public struct NSWindowBuilder {
 
     public var size: CGSize
     public var collapsedSize: CGSize
+
     public var alignment: Alignment
     public var xOffset: CGFloat
     public var yOffset: CGFloat
@@ -52,7 +53,7 @@ public struct NSWindowBuilder {
     }
 
     public func newWindow<Content: View>(
-        @ViewBuilder content: @escaping () -> Content
+        @ViewBuilder content: () -> Content
     ) -> NSWindow {
 
         guard let screen = NSScreen.main else {
@@ -82,16 +83,15 @@ public struct NSWindowBuilder {
         )
 
         let hostingView = NSHostingView(
-            rootView:
-                HoverWindowContent(
-                    collapsedSize: collapsedSize,
-                    expandedSize: size,
-                    window: window,
-                    alignment: alignment,
-                    xOffset: xOffset,
-                    yOffset: yOffset,
-                    content: content
-                )
+            rootView: HoverWindowContent(
+                window: window,
+                collapsedSize: collapsedSize,
+                expandedSize: size,
+                xOffset: xOffset,
+                yOffset: yOffset,
+                alignment: alignment,
+                content: content()
+            )
         )
 
         window.contentView = hostingView
@@ -101,6 +101,7 @@ public struct NSWindowBuilder {
         window.level = level
         window.ignoresMouseEvents = ignoresMouseEvents
         window.collectionBehavior = collectionBehavior
+
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
@@ -113,35 +114,46 @@ public struct NSWindowBuilder {
 
 private struct HoverWindowContent<Content: View>: View {
 
+    let window: NSWindow
     let collapsedSize: CGSize
     let expandedSize: CGSize
-    let window: NSWindow
-    let alignment: Alignment
     let xOffset: CGFloat
     let yOffset: CGFloat
-    let content: () -> Content
+    let alignment: Alignment
+    let content: Content
 
     @State private var isHovered = false
 
     var body: some View {
-        content()
+        content
             .frame(
-                width: isHovered ? expandedSize.width : collapsedSize.width,
-                height: isHovered ? expandedSize.height : collapsedSize.height,
+                width: isHovered
+                    ? expandedSize.width
+                    : collapsedSize.width,
+                height: isHovered
+                    ? expandedSize.height
+                    : collapsedSize.height,
                 alignment: alignment
             )
             .onHover { hovering in
+                guard hovering != isHovered else {
+                    return
+                }
+
                 isHovered = hovering
+
                 resizeWindow(
-                    to: hovering ? expandedSize : collapsedSize
+                    to: hovering
+                        ? expandedSize
+                        : collapsedSize
                 )
             }
     }
 
     private func resizeWindow(to size: CGSize) {
-        guard let screen = NSScreen.main else { return }
-
-        let currentFrame = window.frame
+        guard let screen = NSScreen.main else {
+            return
+        }
 
         let newX = screen.frame.midX
             - size.width / 2
