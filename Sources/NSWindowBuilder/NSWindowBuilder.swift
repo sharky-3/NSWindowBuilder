@@ -65,57 +65,121 @@ public final class NSWindowBuilder {
             fatalError("Could not determine screen")
         }
 
-        // ---------------------------------------------------------
-        // Visual window
-        // ---------------------------------------------------------
-
-        let visualFrame = frame(
-            for: collapsedSize,
-            on: screen
+        let coordinator = WindowCoordinator(
+            collapsedSize: collapsedSize,
+            expandedSize: size,
+            alignment: alignment,
+            xOffset: xOffset,
+            yOffset: yOffset,
+            level: level,
+            ignoresMouseEvents: ignoresMouseEvents,
+            hasShadow: hasShadow,
+            backgroundColor: backgroundColor,
+            isOpaque: isOpaque,
+            collectionBehavior: collectionBehavior,
+            styleMask: styleMask,
+            screen: screen,
+            content: content()
         )
 
-        let visualWindow = NSWindow(
-            contentRect: visualFrame,
+        coordinator.show()
+
+        coordinator.visualWindow.delegate = coordinator
+
+        return coordinator.visualWindow
+    }
+}
+
+@MainActor
+private final class WindowCoordinator<Content: View>: NSObject, NSWindowDelegate {
+
+    let collapsedSize: CGSize
+    let expandedSize: CGSize
+    let alignment: Alignment
+    let xOffset: CGFloat
+    let yOffset: CGFloat
+
+    let level: NSWindow.Level
+    let ignoresMouseEvents: Bool
+    let hasShadow: Bool
+    let backgroundColor: NSColor
+    let isOpaque: Bool
+
+    let collectionBehavior: NSWindow.CollectionBehavior
+    let styleMask: NSWindow.StyleMask
+    let screen: NSScreen
+    let content: Content
+
+    let visualWindow: NSWindow
+    let hitWindow: NSWindow
+
+    init(
+        collapsedSize: CGSize,
+        expandedSize: CGSize,
+        alignment: Alignment,
+        xOffset: CGFloat,
+        yOffset: CGFloat,
+        level: NSWindow.Level,
+        ignoresMouseEvents: Bool,
+        hasShadow: Bool,
+        backgroundColor: NSColor,
+        isOpaque: Bool,
+        collectionBehavior: NSWindow.CollectionBehavior,
+        styleMask: NSWindow.StyleMask,
+        screen: NSScreen,
+        content: Content
+    ) {
+        self.collapsedSize = collapsedSize
+        self.expandedSize = expandedSize
+        self.alignment = alignment
+        self.xOffset = xOffset
+        self.yOffset = yOffset
+        self.level = level
+        self.ignoresMouseEvents = ignoresMouseEvents
+        self.hasShadow = hasShadow
+        self.backgroundColor = backgroundColor
+        self.isOpaque = isOpaque
+        self.collectionBehavior = collectionBehavior
+        self.styleMask = styleMask
+        self.screen = screen
+        self.content = content
+
+        let initialFrame = Self.frame(
+            size: collapsedSize,
+            screen: screen,
+            xOffset: xOffset,
+            yOffset: yOffset
+        )
+        
+        self.visualWindow = NSWindow(
+            contentRect: initialFrame,
             styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
 
         let hostingView = NSHostingView(
-            rootView:
-                content()
-                    .frame(
-                        width: size.width,
-                        height: size.height,
-                        alignment: alignment
-                    )
+            rootView: content
+                .frame(
+                    width: expandedSize.width,
+                    height: expandedSize.height,
+                    alignment: alignment
+                )
         )
 
-        visualWindow.contentView = hostingView
+        self.visualWindow.contentView = hostingView
 
-        visualWindow.isOpaque = isOpaque
-        visualWindow.backgroundColor = backgroundColor
-        visualWindow.level = level
+        self.visualWindow.isOpaque = isOpaque
+        self.visualWindow.backgroundColor = backgroundColor
+        self.visualWindow.level = level
+        self.visualWindow.ignoresMouseEvents = true
+        self.visualWindow.collectionBehavior = collectionBehavior
+        self.visualWindow.titlebarAppearsTransparent = true
+        self.visualWindow.titleVisibility = .hidden
+        self.visualWindow.hasShadow = hasShadow
 
-        // The visual window MUST NOT receive mouse events.
-        visualWindow.ignoresMouseEvents = true
-
-        visualWindow.collectionBehavior = collectionBehavior
-        visualWindow.titlebarAppearsTransparent = true
-        visualWindow.titleVisibility = .hidden
-        visualWindow.hasShadow = hasShadow
-
-        // ---------------------------------------------------------
-        // Hit window
-        // ---------------------------------------------------------
-
-        let hitFrame = frame(
-            for: collapsedSize,
-            on: screen
-        )
-
-        let hitWindow = NSWindow(
-            contentRect: hitFrame,
+        self.hitWindow = NSWindow(
+            contentRect: initialFrame,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -125,67 +189,42 @@ public final class NSWindowBuilder {
             size: collapsedSize
         )
 
-        tracker.onHoverChanged = { [weak self, weak visualWindow] hovering in
-            guard
-                let self,
-                let visualWindow
-            else {
+        self.hitWindow.contentView = tracker
+
+        self.hitWindow.isOpaque = false
+        self.hitWindow.backgroundColor = .clear
+        self.hitWindow.hasShadow = false
+        self.hitWindow.level = level
+        self.hitWindow.ignoresMouseEvents = ignoresMouseEvents
+        self.hitWindow.collectionBehavior = collectionBehavior
+
+        super.init()
+
+        tracker.onHoverChanged = { [weak self] hovering in
+            guard let self else {
                 return
             }
 
-            self.setExpanded(
-                hovering,
-                window: visualWindow,
-                screen: screen
-            )
+            self.setExpanded(hovering)
         }
-
-        hitWindow.contentView = tracker
-
-        hitWindow.isOpaque = false
-        hitWindow.backgroundColor = .clear
-        hitWindow.hasShadow = false
-        hitWindow.level = level
-
-        // This is the ONLY window receiving mouse events.
-        hitWindow.ignoresMouseEvents = ignoresMouseEvents
-
-        hitWindow.collectionBehavior = collectionBehavior
-
-        // Keep a strong reference to the hit window.
-        objc_setAssociatedObject(
-            visualWindow,
-            &AssociatedKeys.hitWindow,
-            hitWindow,
-            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
-        )
-
-        // Keep the visual window alive through the hit window.
-        objc_setAssociatedObject(
-            hitWindow,
-            &AssociatedKeys.visualWindow,
-            visualWindow,
-            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
-        )
-
-        visualWindow.orderFront(nil)
-        hitWindow.orderFront(nil)
-
-        return visualWindow
     }
 
-    private func setExpanded(
-        _ expanded: Bool,
-        window: NSWindow,
-        screen: NSScreen
-    ) {
+    func show() {
+        visualWindow.orderFront(nil)
+        hitWindow.orderFront(nil)
+    }
+
+    private func setExpanded(_ expanded: Bool) {
+
         let targetSize = expanded
-            ? size
+            ? expandedSize
             : collapsedSize
 
-        let targetFrame = frame(
-            for: targetSize,
-            on: screen
+        let targetFrame = Self.frame(
+            size: targetSize,
+            screen: screen,
+            xOffset: xOffset,
+            yOffset: yOffset
         )
 
         NSAnimationContext.runAnimationGroup { context in
@@ -194,16 +233,18 @@ public final class NSWindowBuilder {
                 name: .easeInEaseOut
             )
 
-            window.animator().setFrame(
+            visualWindow.animator().setFrame(
                 targetFrame,
                 display: true
             )
         }
     }
 
-    private func frame(
-        for size: CGSize,
-        on screen: NSScreen
+    static func frame(
+        size: CGSize,
+        screen: NSScreen,
+        xOffset: CGFloat,
+        yOffset: CGFloat
     ) -> CGRect {
 
         CGRect(
@@ -219,11 +260,13 @@ public final class NSWindowBuilder {
             height: size.height
         )
     }
+
+    func windowWillClose(_ notification: Notification) {
+        hitWindow.close()
+    }
 }
 
-
-// MARK: - Hover Tracker
-
+@MainActor
 private final class HoverTrackerView: NSView {
 
     private let trackingSize: CGSize
@@ -231,15 +274,17 @@ private final class HoverTrackerView: NSView {
     var onHoverChanged: ((Bool) -> Void)?
 
     private var trackingArea: NSTrackingArea?
-    private var hovering = false
+    private var isHovering = false
 
     init(size: CGSize) {
         self.trackingSize = size
 
-        super.init(frame: CGRect(
-            origin: .zero,
-            size: size
-        ))
+        super.init(
+            frame: CGRect(
+                origin: .zero,
+                size: size
+            )
+        )
     }
 
     required init?(coder: NSCoder) {
@@ -253,7 +298,7 @@ private final class HoverTrackerView: NSView {
             removeTrackingArea(trackingArea)
         }
 
-        let area = NSTrackingArea(
+        let trackingArea = NSTrackingArea(
             rect: bounds,
             options: [
                 .mouseEnteredAndExited,
@@ -263,34 +308,25 @@ private final class HoverTrackerView: NSView {
             userInfo: nil
         )
 
-        addTrackingArea(area)
-        trackingArea = area
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
     }
 
     override func mouseEntered(with event: NSEvent) {
-        guard !hovering else {
+        guard !isHovering else {
             return
         }
 
-        hovering = true
+        isHovering = true
         onHoverChanged?(true)
     }
 
     override func mouseExited(with event: NSEvent) {
-        guard hovering else {
+        guard isHovering else {
             return
         }
 
-        hovering = false
+        isHovering = false
         onHoverChanged?(false)
     }
-}
-
-
-// MARK: - Associated Objects
-
-private enum AssociatedKeys {
-
-    static var hitWindow = "NSWindowBuilder.hitWindow"
-    static var visualWindow = "NSWindowBuilder.visualWindow"
 }
