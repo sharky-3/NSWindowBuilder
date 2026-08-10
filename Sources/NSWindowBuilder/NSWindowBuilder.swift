@@ -5,94 +5,68 @@ import SwiftUI
 private final class HoverableWindow: NSWindow {
 
     var onHover: ((Bool) -> Void)?
-    var expandedSize: CGSize
+    var expandedSize: CGSize = CGSize(width: 300, height: 60)
 
     private let collapsedSize = CGSize(
         width: 250,
         height: 38
     )
 
+    private var trackingArea: NSTrackingArea?
     private var isExpanded = false
-    private var timer: Timer?
 
-    init(
-        contentRect: NSRect,
-        styleMask style: NSWindow.StyleMask,
-        backing backingStoreType: NSWindow.BackingStoreType,
-        defer flag: Bool,
-        expandedSize: CGSize
-    ) {
-        self.expandedSize = expandedSize
-
-        super.init(
-            contentRect: contentRect,
-            styleMask: style,
-            backing: backingStoreType,
-            defer: flag
-        )
-
-        timer = Timer.scheduledTimer(
-            withTimeInterval: 0.03,
-            repeats: true
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.updateHover()
-            }
-        }
-    }
-
-    private func updateHover() {
-        let mouseLocation = NSEvent.mouseLocation
-
-        if isExpanded {
-            if !frame.contains(mouseLocation) {
-                collapse()
-            }
-        } else {
-            if frame.contains(mouseLocation) {
-                expand()
-            }
-        }
-    }
-
-    private func expand() {
+    override func mouseEntered(with event: NSEvent) {
         guard !isExpanded else {
             return
         }
 
         isExpanded = true
         onHover?(true)
-
-        let currentFrame = frame
-
-        let newFrame = NSRect(
-            x: currentFrame.midX - expandedSize.width / 2,
-            y: currentFrame.maxY - expandedSize.height,
-            width: expandedSize.width,
-            height: expandedSize.height
-        )
-
-        animator().setFrame(
-            newFrame,
-            display: true
-        )
+        resize(to: expandedSize)
     }
 
-    private func collapse() {
+    override func mouseExited(with event: NSEvent) {
         guard isExpanded else {
             return
         }
 
         isExpanded = false
         onHover?(false)
+        resize(to: collapsedSize)
+    }
 
+    func setupTrackingArea() {
+        guard let contentView else {
+            return
+        }
+
+        if let trackingArea {
+            contentView.removeTrackingArea(trackingArea)
+        }
+
+        let area = NSTrackingArea(
+            rect: contentView.bounds,
+            options: [
+                .mouseEnteredAndExited,
+                .activeAlways,
+                .inVisibleRect
+            ],
+            owner: self,
+            userInfo: nil
+        )
+
+        contentView.addTrackingArea(area)
+        trackingArea = area
+    }
+
+    private func resize(to size: CGSize) {
         let currentFrame = frame
 
         let newFrame = NSRect(
-            x: currentFrame.midX - collapsedSize.width / 2,
-            y: currentFrame.maxY - collapsedSize.height,
-            width: collapsedSize.width,
-            height: collapsedSize.height
+            x: currentFrame.midX - size.width / 2,
+            y: currentFrame.maxY - size.height,
+            width: size.width,
+            height: size.height
         )
 
         animator().setFrame(
@@ -195,10 +169,10 @@ public struct NSWindowBuilder {
             ),
             styleMask: styleMask,
             backing: .buffered,
-            defer: false,
-            expandedSize: size
+            defer: false
         )
 
+        window.expandedSize = size
         window.contentView = hostingView
 
         window.isOpaque = isOpaque
@@ -206,11 +180,14 @@ public struct NSWindowBuilder {
         window.level = level
         window.ignoresMouseEvents = ignoresMouseEvents
         window.collectionBehavior = collectionBehavior
+
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
+
         window.onHover = onHover
 
+        window.setupTrackingArea()
         window.orderFront(nil)
 
         return window
