@@ -5,22 +5,21 @@ import SwiftUI
 private final class HoverableWindow: NSWindow {
 
     var onHover: ((Bool) -> Void)?
-    var expandedSize: CGSize
-    var collapsedSize: CGSize
 
-    private var isHovered = false
-    private var mouseMonitor: Any?
+    var expandedSize: CGSize
+    let collapsedSize = CGSize(width: 250, height: 38)
+
+    private var trackingTimer: Timer?
+    private var hovering = false
 
     init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,
         backing backingStoreType: NSWindow.BackingStoreType,
         defer flag: Bool,
-        expandedSize: CGSize,
-        collapsedSize: CGSize
+        expandedSize: CGSize
     ) {
         self.expandedSize = expandedSize
-        self.collapsedSize = collapsedSize
 
         super.init(
             contentRect: contentRect,
@@ -29,48 +28,65 @@ private final class HoverableWindow: NSWindow {
             defer: flag
         )
 
-        acceptsMouseMovedEvents = true
-
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.mouseMoved]
-        ) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.updateHover()
-            }
+        trackingTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.03,
+            repeats: true
+        ) { [weak self] _ in
+            self?.checkHover()
         }
     }
 
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        updateHover()
-    }
+    private func checkHover() {
+        let mouse = NSEvent.mouseLocation
 
-    func updateHover() {
-        let mouseLocation = NSEvent.mouseLocation
-        let hovering = frame.contains(mouseLocation)
+        let hoverRect = NSRect(
+            x: frame.midX - expandedSize.width / 2,
+            y: frame.maxY - expandedSize.height,
+            width: expandedSize.width,
+            height: expandedSize.height
+        )
 
-        guard hovering != isHovered else {
+        let isInside = hoverRect.contains(mouse)
+
+        guard isInside != hovering else {
             return
         }
 
-        isHovered = hovering
-        onHover?(hovering)
+        hovering = isInside
 
-        animateToSize(
-            hovering
-                ? expandedSize
-                : collapsedSize
+        onHover?(isInside)
+
+        if isInside {
+            expand()
+        } else {
+            collapse()
+        }
+    }
+
+    private func expand() {
+        let currentFrame = frame
+
+        let newFrame = NSRect(
+            x: currentFrame.midX - expandedSize.width / 2,
+            y: currentFrame.maxY - expandedSize.height,
+            width: expandedSize.width,
+            height: expandedSize.height
+        )
+
+        animator().setFrame(
+            newFrame,
+            display: true
         )
     }
 
-    private func animateToSize(_ newSize: CGSize) {
-        let oldFrame = frame
+    private func collapse() {
+        let currentFrame = frame
 
         let newFrame = NSRect(
-            x: oldFrame.midX - newSize.width / 2,
-            y: oldFrame.maxY - newSize.height,
-            width: newSize.width,
-            height: newSize.height
+            x: currentFrame.midX - collapsedSize.width / 2,
+            y: currentFrame.maxY - collapsedSize.height,
+            width: collapsedSize.width,
+            height: collapsedSize.height
         )
 
         animator().setFrame(
@@ -84,7 +100,6 @@ private final class HoverableWindow: NSWindow {
 public struct NSWindowBuilder {
 
     public var size: CGSize
-    public var collapsedSize: CGSize
     public var alignment: Alignment
     public var xOffset: CGFloat
     public var yOffset: CGFloat
@@ -105,10 +120,6 @@ public struct NSWindowBuilder {
             width: 300,
             height: 60
         ),
-        collapsedSize: CGSize = CGSize(
-            width: 250,
-            height: 38
-        ),
         alignment: Alignment = .center,
         xOffset: CGFloat = 0,
         yOffset: CGFloat = 0,
@@ -128,7 +139,6 @@ public struct NSWindowBuilder {
         onHover: ((Bool) -> Void)? = nil
     ) {
         self.size = size
-        self.collapsedSize = collapsedSize
         self.alignment = alignment
         self.xOffset = xOffset
         self.yOffset = yOffset
@@ -151,11 +161,11 @@ public struct NSWindowBuilder {
         }
 
         let x = screen.frame.midX
-            - collapsedSize.width / 2
+            - 250 / 2
             + xOffset
 
         let y = screen.frame.maxY
-            - collapsedSize.height
+            - 38
             + yOffset
 
         let hostingView = NSHostingView(
@@ -171,14 +181,13 @@ public struct NSWindowBuilder {
             contentRect: CGRect(
                 x: x,
                 y: y,
-                width: collapsedSize.width,
-                height: collapsedSize.height
+                width: 250,
+                height: 38
             ),
             styleMask: styleMask,
             backing: .buffered,
             defer: false,
-            expandedSize: size,
-            collapsedSize: collapsedSize
+            expandedSize: size
         )
 
         window.contentView = hostingView
