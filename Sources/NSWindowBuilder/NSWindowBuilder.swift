@@ -24,7 +24,7 @@ public struct NSWindowBuilder {
         xOffset: CGFloat = 0,
         yOffset: CGFloat = 0,
         level: NSWindow.Level = .screenSaver,
-        ignoresMouseEvents: Bool = true,
+        ignoresMouseEvents: Bool = false,
         hasShadow: Bool = false,
         backgroundColor: NSColor = .clear,
         isOpaque: Bool = false,
@@ -50,7 +50,7 @@ public struct NSWindowBuilder {
 
     public func newWindow<Content: View>(
         @ViewBuilder content: () -> Content
-    ) -> OverlayWindow {
+    ) -> NSWindow {
 
         guard let screen = NSScreen.main else {
             fatalError("No screen available")
@@ -65,16 +65,15 @@ public struct NSWindowBuilder {
             + yOffset
 
         let hostingView = NSHostingView(
-            rootView:
-                content()
-                    .frame(
-                        width: size.width,
-                        height: size.height,
-                        alignment: alignment
-                    )
+            rootView: content()
+                .frame(
+                    width: size.width,
+                    height: size.height,
+                    alignment: alignment
+                )
         )
 
-        let window = OverlayWindow(
+        let window = NSWindow(
             contentRect: CGRect(
                 x: x,
                 y: y,
@@ -92,107 +91,16 @@ public struct NSWindowBuilder {
         window.backgroundColor = backgroundColor
 
         window.level = level
+        window.ignoresMouseEvents = ignoresMouseEvents
+
         window.collectionBehavior = collectionBehavior
 
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
 
-        window.ignoresMouseEvents = ignoresMouseEvents
-
         window.orderFront(nil)
 
         return window
-    }
-}
-
-
-@MainActor
-public final class OverlayWindow: NSWindow {
-    public override var canBecomeKey: Bool {
-        false
-    }
-    public override var canBecomeMain: Bool {
-        false
-    }
-}
-
-@MainActor
-public final class OverlayMouseController {
-
-    private weak var window: OverlayWindow?
-
-    private var monitor: Any?
-
-    public init(window: OverlayWindow) {
-        self.window = window
-        startMonitoring()
-    }
-
-    public func stop() {
-        guard let monitor else {
-            return
-        }
-
-        NSEvent.removeMonitor(monitor)
-        self.monitor = nil
-    }
-
-    private func startMonitoring() {
-
-        monitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [
-                .mouseMoved,
-                .leftMouseDown,
-                .leftMouseUp,
-                .rightMouseDown,
-                .rightMouseUp
-            ]
-        ) { [weak self] _ in
-
-            Task { @MainActor [weak self] in
-                self?.update()
-            }
-        }
-    }
-
-    private func update() {
-
-        guard let window else {
-            return
-        }
-
-        let screenPoint = NSEvent.mouseLocation
-
-        if !window.frame.contains(screenPoint) {
-            window.ignoresMouseEvents = true
-            return
-        }
-
-        guard let contentView = window.contentView else {
-            window.ignoresMouseEvents = true
-            return
-        }
-
-        let windowPoint = window.convertPoint(
-            fromScreen: screenPoint
-        )
-
-        let localPoint = contentView.convert(
-            windowPoint,
-            from: nil
-        )
-
-        let hitView = contentView.hitTest(localPoint)
-
-        if let hitView,
-           hitView !== contentView {
-
-            window.ignoresMouseEvents = false
-
-        } else {
-
-            window.ignoresMouseEvents = true
-        }
     }
 }
