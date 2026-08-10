@@ -86,24 +86,19 @@ public struct NSWindowBuilder {
         )
 
         window.contentView = hostingView
-
         window.isOpaque = isOpaque
         window.backgroundColor = backgroundColor
-
         window.level = level
         window.ignoresMouseEvents = ignoresMouseEvents
-
         window.collectionBehavior = collectionBehavior
-
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
-
         window.orderFront(nil)
 
         return window
     }
-    
+
     public func isMouseOverWindow(
         _ window: NSWindow
     ) -> Bool {
