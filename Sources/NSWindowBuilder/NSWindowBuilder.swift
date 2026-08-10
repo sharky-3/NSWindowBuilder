@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-public struct NSWindowBuilder {
+public final class NSWindowBuilder {
 
     public var size: CGSize
     public var collapsedSize: CGSize
@@ -52,164 +52,194 @@ public struct NSWindowBuilder {
         self.styleMask = styleMask
     }
 
+    @discardableResult
     public func newWindow<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> NSWindow {
 
-        // Find the screen containing the mouse.
         let mouseLocation = NSEvent.mouseLocation
 
         guard let screen = NSScreen.screens.first(where: {
-            NSMouseInRect(mouseLocation, $0.frame, false)
-        }) ?? NSScreen.screens.first else {
-            fatalError("No screen available")
+            $0.frame.contains(mouseLocation)
+        }) else {
+            fatalError("Could not determine screen")
         }
 
-        let initialSize = collapsedSize
+        // ---------------------------------------------------------
+        // Visual window
+        // ---------------------------------------------------------
 
-        let x = screen.frame.midX
-            - initialSize.width / 2
-            + xOffset
+        let visualFrame = frame(
+            for: collapsedSize,
+            on: screen
+        )
 
-        let y = screen.frame.maxY
-            - initialSize.height
-            + yOffset
-
-        let window = NSWindow(
-            contentRect: CGRect(
-                x: x,
-                y: y,
-                width: initialSize.width,
-                height: initialSize.height
-            ),
+        let visualWindow = NSWindow(
+            contentRect: visualFrame,
             styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
 
-        let trackingView = HoverTrackingView(
-            collapsedSize: collapsedSize,
-            expandedSize: size,
-            xOffset: xOffset,
-            yOffset: yOffset
+        let hostingView = NSHostingView(
+            rootView:
+                content()
+                    .frame(
+                        width: size.width,
+                        height: size.height,
+                        alignment: alignment
+                    )
         )
 
-        trackingView.onHoverChanged = { [weak window] hovering in
-            guard let window else { return }
+        visualWindow.contentView = hostingView
 
-            resize(
-                window: window,
-                screen: screen,
-                size: hovering ? size : collapsedSize,
-                xOffset: xOffset,
-                yOffset: yOffset
+        visualWindow.isOpaque = isOpaque
+        visualWindow.backgroundColor = backgroundColor
+        visualWindow.level = level
+
+        // The visual window MUST NOT receive mouse events.
+        visualWindow.ignoresMouseEvents = true
+
+        visualWindow.collectionBehavior = collectionBehavior
+        visualWindow.titlebarAppearsTransparent = true
+        visualWindow.titleVisibility = .hidden
+        visualWindow.hasShadow = hasShadow
+
+        // ---------------------------------------------------------
+        // Hit window
+        // ---------------------------------------------------------
+
+        let hitFrame = frame(
+            for: collapsedSize,
+            on: screen
+        )
+
+        let hitWindow = NSWindow(
+            contentRect: hitFrame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+
+        let tracker = HoverTrackerView(
+            size: collapsedSize
+        )
+
+        tracker.onHoverChanged = { [weak self, weak visualWindow] hovering in
+            guard
+                let self,
+                let visualWindow
+            else {
+                return
+            }
+
+            self.setExpanded(
+                hovering,
+                window: visualWindow,
+                screen: screen
             )
         }
 
-        let hostingView = NSHostingView(
-            rootView: content()
-                .frame(
-                    width: size.width,
-                    height: size.height,
-                    alignment: alignment
-                )
+        hitWindow.contentView = tracker
+
+        hitWindow.isOpaque = false
+        hitWindow.backgroundColor = .clear
+        hitWindow.hasShadow = false
+        hitWindow.level = level
+
+        // This is the ONLY window receiving mouse events.
+        hitWindow.ignoresMouseEvents = ignoresMouseEvents
+
+        hitWindow.collectionBehavior = collectionBehavior
+
+        // Keep a strong reference to the hit window.
+        objc_setAssociatedObject(
+            visualWindow,
+            &AssociatedKeys.hitWindow,
+            hitWindow,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
         )
 
-        trackingView.addSubview(hostingView)
+        // Keep the visual window alive through the hit window.
+        objc_setAssociatedObject(
+            hitWindow,
+            &AssociatedKeys.visualWindow,
+            visualWindow,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+        )
 
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        visualWindow.orderFront(nil)
+        hitWindow.orderFront(nil)
 
-        NSLayoutConstraint.activate([
-            hostingView.centerXAnchor.constraint(
-                equalTo: trackingView.centerXAnchor
-            ),
-            hostingView.centerYAnchor.constraint(
-                equalTo: trackingView.centerYAnchor
-            )
-        ])
-
-        window.contentView = trackingView
-
-        window.isOpaque = isOpaque
-        window.backgroundColor = backgroundColor
-        window.level = level
-        window.ignoresMouseEvents = ignoresMouseEvents
-        window.collectionBehavior = collectionBehavior
-
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.hasShadow = hasShadow
-
-        window.orderFront(nil)
-
-        return window
+        return visualWindow
     }
 
-    private func resize(
+    private func setExpanded(
+        _ expanded: Bool,
         window: NSWindow,
-        screen: NSScreen,
-        size: CGSize,
-        xOffset: CGFloat,
-        yOffset: CGFloat
+        screen: NSScreen
     ) {
-        let newX = screen.frame.midX
-            - size.width / 2
-            + xOffset
+        let targetSize = expanded
+            ? size
+            : collapsedSize
 
-        let newY = screen.frame.maxY
-            - size.height
-            + yOffset
-
-        let frame = CGRect(
-            x: newX,
-            y: newY,
-            width: size.width,
-            height: size.height
+        let targetFrame = frame(
+            for: targetSize,
+            on: screen
         )
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
+            context.duration = 0.18
             context.timingFunction = CAMediaTimingFunction(
                 name: .easeInEaseOut
             )
 
             window.animator().setFrame(
-                frame,
+                targetFrame,
                 display: true
             )
         }
     }
+
+    private func frame(
+        for size: CGSize,
+        on screen: NSScreen
+    ) -> CGRect {
+
+        CGRect(
+            x: screen.frame.midX
+                - size.width / 2
+                + xOffset,
+
+            y: screen.frame.maxY
+                - size.height
+                + yOffset,
+
+            width: size.width,
+            height: size.height
+        )
+    }
 }
 
 
-// MARK: - Hover Tracking
+// MARK: - Hover Tracker
 
-private final class HoverTrackingView: NSView {
+private final class HoverTrackerView: NSView {
 
-    let collapsedSize: CGSize
-    let expandedSize: CGSize
-    let xOffset: CGFloat
-    let yOffset: CGFloat
+    private let trackingSize: CGSize
 
     var onHoverChanged: ((Bool) -> Void)?
 
     private var trackingArea: NSTrackingArea?
-    private var isHovering = false
+    private var hovering = false
 
-    init(
-        collapsedSize: CGSize,
-        expandedSize: CGSize,
-        xOffset: CGFloat,
-        yOffset: CGFloat
-    ) {
-        self.collapsedSize = collapsedSize
-        self.expandedSize = expandedSize
-        self.xOffset = xOffset
-        self.yOffset = yOffset
+    init(size: CGSize) {
+        self.trackingSize = size
 
-        super.init(frame: .zero)
-
-        wantsLayer = true
+        super.init(frame: CGRect(
+            origin: .zero,
+            size: size
+        ))
     }
 
     required init?(coder: NSCoder) {
@@ -223,17 +253,8 @@ private final class HoverTrackingView: NSView {
             removeTrackingArea(trackingArea)
         }
 
-        // IMPORTANT:
-        // Track only the collapsed-size area.
-        let rect = CGRect(
-            x: (bounds.width - collapsedSize.width) / 2,
-            y: (bounds.height - collapsedSize.height) / 2,
-            width: collapsedSize.width,
-            height: collapsedSize.height
-        )
-
         let area = NSTrackingArea(
-            rect: rect,
+            rect: bounds,
             options: [
                 .mouseEnteredAndExited,
                 .activeAlways
@@ -246,21 +267,30 @@ private final class HoverTrackingView: NSView {
         trackingArea = area
     }
 
-    override func mouseEntered(
-        with event: NSEvent
-    ) {
-        guard !isHovering else { return }
+    override func mouseEntered(with event: NSEvent) {
+        guard !hovering else {
+            return
+        }
 
-        isHovering = true
+        hovering = true
         onHoverChanged?(true)
     }
 
-    override func mouseExited(
-        with event: NSEvent
-    ) {
-        guard isHovering else { return }
+    override func mouseExited(with event: NSEvent) {
+        guard hovering else {
+            return
+        }
 
-        isHovering = false
+        hovering = false
         onHoverChanged?(false)
     }
+}
+
+
+// MARK: - Associated Objects
+
+private enum AssociatedKeys {
+
+    static var hitWindow = "NSWindowBuilder.hitWindow"
+    static var visualWindow = "NSWindowBuilder.visualWindow"
 }
