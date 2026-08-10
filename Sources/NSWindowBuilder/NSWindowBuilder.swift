@@ -5,6 +5,7 @@ import SwiftUI
 public struct NSWindowBuilder {
 
     public var size: CGSize
+    public var collapsedSize: CGSize
     public var alignment: Alignment
     public var xOffset: CGFloat
     public var yOffset: CGFloat
@@ -20,6 +21,7 @@ public struct NSWindowBuilder {
 
     public init(
         size: CGSize = CGSize(width: 300, height: 60),
+        collapsedSize: CGSize = CGSize(width: 250, height: 38),
         alignment: Alignment = .center,
         xOffset: CGFloat = 0,
         yOffset: CGFloat = 0,
@@ -36,6 +38,7 @@ public struct NSWindowBuilder {
         styleMask: NSWindow.StyleMask = [.borderless]
     ) {
         self.size = size
+        self.collapsedSize = collapsedSize
         self.alignment = alignment
         self.xOffset = xOffset
         self.yOffset = yOffset
@@ -49,52 +52,55 @@ public struct NSWindowBuilder {
     }
 
     public func newWindow<Content: View>(
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> NSWindow {
 
         guard let screen = NSScreen.main else {
             fatalError("No screen available")
         }
 
+        let initialSize = collapsedSize
+
         let x = screen.frame.midX
-            - size.width / 2
+            - initialSize.width / 2
             + xOffset
 
         let y = screen.frame.maxY
-            - size.height
+            - initialSize.height
             + yOffset
-
-        let hostingView = NSHostingView(
-            rootView: content()
-                .frame(
-                    width: size.width,
-                    height: size.height,
-                    alignment: alignment
-                )
-        )
 
         let window = NSWindow(
             contentRect: CGRect(
                 x: x,
                 y: y,
-                width: size.width,
-                height: size.height
+                width: initialSize.width,
+                height: initialSize.height
             ),
             styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
 
+        let hostingView = NSHostingView(
+            rootView:
+                HoverWindowContent(
+                    collapsedSize: collapsedSize,
+                    expandedSize: size,
+                    window: window,
+                    alignment: alignment,
+                    xOffset: xOffset,
+                    yOffset: yOffset,
+                    content: content
+                )
+        )
+
         window.contentView = hostingView
 
         window.isOpaque = isOpaque
         window.backgroundColor = backgroundColor
-
         window.level = level
         window.ignoresMouseEvents = ignoresMouseEvents
-
         window.collectionBehavior = collectionBehavior
-
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
@@ -102,5 +108,66 @@ public struct NSWindowBuilder {
         window.orderFront(nil)
 
         return window
+    }
+}
+
+private struct HoverWindowContent<Content: View>: View {
+
+    let collapsedSize: CGSize
+    let expandedSize: CGSize
+    let window: NSWindow
+    let alignment: Alignment
+    let xOffset: CGFloat
+    let yOffset: CGFloat
+    let content: () -> Content
+
+    @State private var isHovered = false
+
+    var body: some View {
+        content()
+            .frame(
+                width: isHovered ? expandedSize.width : collapsedSize.width,
+                height: isHovered ? expandedSize.height : collapsedSize.height,
+                alignment: alignment
+            )
+            .onHover { hovering in
+                isHovered = hovering
+                resizeWindow(
+                    to: hovering ? expandedSize : collapsedSize
+                )
+            }
+    }
+
+    private func resizeWindow(to size: CGSize) {
+        guard let screen = NSScreen.main else { return }
+
+        let currentFrame = window.frame
+
+        let newX = screen.frame.midX
+            - size.width / 2
+            + xOffset
+
+        let newY = screen.frame.maxY
+            - size.height
+            + yOffset
+
+        let newFrame = CGRect(
+            x: newX,
+            y: newY,
+            width: size.width,
+            height: size.height
+        )
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(
+                name: .easeInEaseOut
+            )
+
+            window.animator().setFrame(
+                newFrame,
+                display: true
+            )
+        }
     }
 }
