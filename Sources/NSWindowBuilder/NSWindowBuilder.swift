@@ -5,12 +5,15 @@ import SwiftUI
 private final class HoverableWindow: NSWindow {
 
     var onHover: ((Bool) -> Void)?
-
     var expandedSize: CGSize
-    let collapsedSize = CGSize(width: 250, height: 38)
 
-    private var trackingTimer: Timer?
-    private var hovering = false
+    private let collapsedSize = CGSize(
+        width: 250,
+        height: 38
+    )
+
+    private var isExpanded = false
+    private var timer: Timer?
 
     init(
         contentRect: NSRect,
@@ -28,42 +31,38 @@ private final class HoverableWindow: NSWindow {
             defer: flag
         )
 
-        trackingTimer = Timer.scheduledTimer(
+        timer = Timer.scheduledTimer(
             withTimeInterval: 0.03,
             repeats: true
         ) { [weak self] _ in
-            self?.checkHover()
+            Task { @MainActor in
+                self?.updateHover()
+            }
         }
     }
 
-    private func checkHover() {
-        let mouse = NSEvent.mouseLocation
+    private func updateHover() {
+        let mouseLocation = NSEvent.mouseLocation
 
-        let hoverRect = NSRect(
-            x: frame.midX - expandedSize.width / 2,
-            y: frame.maxY - expandedSize.height,
-            width: expandedSize.width,
-            height: expandedSize.height
-        )
-
-        let isInside = hoverRect.contains(mouse)
-
-        guard isInside != hovering else {
-            return
-        }
-
-        hovering = isInside
-
-        onHover?(isInside)
-
-        if isInside {
-            expand()
+        if isExpanded {
+            if !frame.contains(mouseLocation) {
+                collapse()
+            }
         } else {
-            collapse()
+            if frame.contains(mouseLocation) {
+                expand()
+            }
         }
     }
 
     private func expand() {
+        guard !isExpanded else {
+            return
+        }
+
+        isExpanded = true
+        onHover?(true)
+
         let currentFrame = frame
 
         let newFrame = NSRect(
@@ -80,6 +79,13 @@ private final class HoverableWindow: NSWindow {
     }
 
     private func collapse() {
+        guard isExpanded else {
+            return
+        }
+
+        isExpanded = false
+        onHover?(false)
+
         let currentFrame = frame
 
         let newFrame = NSRect(
@@ -160,12 +166,15 @@ public struct NSWindowBuilder {
             fatalError("No screen available")
         }
 
+        let collapsedWidth: CGFloat = 250
+        let collapsedHeight: CGFloat = 38
+
         let x = screen.frame.midX
-            - 250 / 2
+            - collapsedWidth / 2
             + xOffset
 
         let y = screen.frame.maxY
-            - 38
+            - collapsedHeight
             + yOffset
 
         let hostingView = NSHostingView(
@@ -178,11 +187,11 @@ public struct NSWindowBuilder {
         )
 
         let window = HoverableWindow(
-            contentRect: CGRect(
+            contentRect: NSRect(
                 x: x,
                 y: y,
-                width: 250,
-                height: 38
+                width: collapsedWidth,
+                height: collapsedHeight
             ),
             styleMask: styleMask,
             backing: .buffered,
