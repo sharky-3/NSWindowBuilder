@@ -8,20 +8,6 @@ private final class HoverableWindow: NSWindow {
 
     private var trackingArea: NSTrackingArea?
 
-    override func setFrame(
-        _ frameRect: NSRect,
-        display flag: Bool,
-        animate animateFlag: Bool
-    ) {
-        super.setFrame(
-            frameRect,
-            display: flag,
-            animate: animateFlag
-        )
-
-        setupTrackingArea()
-    }
-
     func setupTrackingArea() {
         guard let contentView else {
             return
@@ -144,7 +130,6 @@ public struct NSWindowBuilder {
         )
 
         window.contentView = hostingView
-
         window.isOpaque = isOpaque
         window.backgroundColor = backgroundColor
         window.level = level
