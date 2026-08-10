@@ -2,81 +2,6 @@ import AppKit
 import SwiftUI
 
 @MainActor
-private final class HoverableWindow: NSWindow {
-
-    var onHover: ((Bool) -> Void)?
-    var expandedSize: CGSize = CGSize(width: 300, height: 60)
-
-    private let collapsedSize = CGSize(
-        width: 250,
-        height: 38
-    )
-
-    private var trackingArea: NSTrackingArea?
-    private var isExpanded = false
-
-    override func mouseEntered(with event: NSEvent) {
-        guard !isExpanded else {
-            return
-        }
-
-        isExpanded = true
-        onHover?(true)
-        resize(to: expandedSize)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        guard isExpanded else {
-            return
-        }
-
-        isExpanded = false
-        onHover?(false)
-        resize(to: collapsedSize)
-    }
-
-    func setupTrackingArea() {
-        guard let contentView else {
-            return
-        }
-
-        if let trackingArea {
-            contentView.removeTrackingArea(trackingArea)
-        }
-
-        let area = NSTrackingArea(
-            rect: contentView.bounds,
-            options: [
-                .mouseEnteredAndExited,
-                .activeAlways,
-                .inVisibleRect
-            ],
-            owner: self,
-            userInfo: nil
-        )
-
-        contentView.addTrackingArea(area)
-        trackingArea = area
-    }
-
-    private func resize(to size: CGSize) {
-        let currentFrame = frame
-
-        let newFrame = NSRect(
-            x: currentFrame.midX - size.width / 2,
-            y: currentFrame.maxY - size.height,
-            width: size.width,
-            height: size.height
-        )
-
-        animator().setFrame(
-            newFrame,
-            display: true
-        )
-    }
-}
-
-@MainActor
 public struct NSWindowBuilder {
 
     public var size: CGSize
@@ -93,13 +18,8 @@ public struct NSWindowBuilder {
     public var collectionBehavior: NSWindow.CollectionBehavior
     public var styleMask: NSWindow.StyleMask
 
-    public var onHover: ((Bool) -> Void)?
-
     public init(
-        size: CGSize = CGSize(
-            width: 300,
-            height: 60
-        ),
+        size: CGSize = CGSize(width: 300, height: 60),
         alignment: Alignment = .center,
         xOffset: CGFloat = 0,
         yOffset: CGFloat = 0,
@@ -113,10 +33,7 @@ public struct NSWindowBuilder {
             .fullScreenAuxiliary,
             .stationary
         ],
-        styleMask: NSWindow.StyleMask = [
-            .borderless
-        ],
-        onHover: ((Bool) -> Void)? = nil
+        styleMask: NSWindow.StyleMask = [.borderless]
     ) {
         self.size = size
         self.alignment = alignment
@@ -129,7 +46,6 @@ public struct NSWindowBuilder {
         self.isOpaque = isOpaque
         self.collectionBehavior = collectionBehavior
         self.styleMask = styleMask
-        self.onHover = onHover
     }
 
     public func newWindow<Content: View>(
@@ -140,15 +56,12 @@ public struct NSWindowBuilder {
             fatalError("No screen available")
         }
 
-        let collapsedWidth: CGFloat = 250
-        let collapsedHeight: CGFloat = 38
-
         let x = screen.frame.midX
-            - collapsedWidth / 2
+            - size.width / 2
             + xOffset
 
         let y = screen.frame.maxY
-            - collapsedHeight
+            - size.height
             + yOffset
 
         let hostingView = NSHostingView(
@@ -160,36 +73,42 @@ public struct NSWindowBuilder {
                 )
         )
 
-        let window = HoverableWindow(
-            contentRect: NSRect(
+        let window = NSWindow(
+            contentRect: CGRect(
                 x: x,
                 y: y,
-                width: collapsedWidth,
-                height: collapsedHeight
+                width: size.width,
+                height: size.height
             ),
             styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
 
-        window.expandedSize = size
         window.contentView = hostingView
 
         window.isOpaque = isOpaque
         window.backgroundColor = backgroundColor
+
         window.level = level
         window.ignoresMouseEvents = ignoresMouseEvents
+
         window.collectionBehavior = collectionBehavior
 
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
 
-        window.onHover = onHover
-
-        window.setupTrackingArea()
         window.orderFront(nil)
 
         return window
+    }
+    
+    public func isMouseOverWindow(
+        _ window: NSWindow
+    ) -> Bool {
+        window.frame.contains(
+            NSEvent.mouseLocation
+        )
     }
 }
