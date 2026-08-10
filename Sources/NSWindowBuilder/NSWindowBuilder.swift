@@ -2,6 +2,60 @@ import AppKit
 import SwiftUI
 
 @MainActor
+private final class HoverableWindow: NSWindow {
+
+    var onHover: ((Bool) -> Void)?
+
+    private var trackingArea: NSTrackingArea?
+
+    override func setFrame(
+        _ frameRect: NSRect,
+        display flag: Bool,
+        animate animateFlag: Bool
+    ) {
+        super.setFrame(
+            frameRect,
+            display: flag,
+            animate: animateFlag
+        )
+
+        setupTrackingArea()
+    }
+
+    func setupTrackingArea() {
+        guard let contentView else {
+            return
+        }
+
+        if let trackingArea {
+            contentView.removeTrackingArea(trackingArea)
+        }
+
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [
+                .mouseEnteredAndExited,
+                .activeAlways,
+                .inVisibleRect
+            ],
+            owner: self,
+            userInfo: nil
+        )
+
+        contentView.addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHover?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHover?(false)
+    }
+}
+
+@MainActor
 public struct NSWindowBuilder {
 
     public var size: CGSize
@@ -18,6 +72,8 @@ public struct NSWindowBuilder {
     public var collectionBehavior: NSWindow.CollectionBehavior
     public var styleMask: NSWindow.StyleMask
 
+    public var onHover: ((Bool) -> Void)?
+
     public init(
         size: CGSize = CGSize(width: 300, height: 60),
         alignment: Alignment = .center,
@@ -33,7 +89,8 @@ public struct NSWindowBuilder {
             .fullScreenAuxiliary,
             .stationary
         ],
-        styleMask: NSWindow.StyleMask = [.borderless]
+        styleMask: NSWindow.StyleMask = [.borderless],
+        onHover: ((Bool) -> Void)? = nil
     ) {
         self.size = size
         self.alignment = alignment
@@ -46,6 +103,7 @@ public struct NSWindowBuilder {
         self.isOpaque = isOpaque
         self.collectionBehavior = collectionBehavior
         self.styleMask = styleMask
+        self.onHover = onHover
     }
 
     public func newWindow<Content: View>(
@@ -73,7 +131,7 @@ public struct NSWindowBuilder {
                 )
         )
 
-        let window = NSWindow(
+        let window = HoverableWindow(
             contentRect: CGRect(
                 x: x,
                 y: y,
@@ -89,16 +147,15 @@ public struct NSWindowBuilder {
 
         window.isOpaque = isOpaque
         window.backgroundColor = backgroundColor
-
         window.level = level
         window.ignoresMouseEvents = ignoresMouseEvents
-
         window.collectionBehavior = collectionBehavior
-
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
+        window.onHover = onHover
 
+        window.setupTrackingArea()
         window.orderFront(nil)
 
         return window
