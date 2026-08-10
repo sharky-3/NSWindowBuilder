@@ -56,7 +56,12 @@ public struct NSWindowBuilder {
         @ViewBuilder content: () -> Content
     ) -> NSWindow {
 
-        guard let screen = NSScreen.main else {
+        // Find the screen containing the mouse.
+        let mouseLocation = NSEvent.mouseLocation
+
+        guard let screen = NSScreen.screens.first(where: {
+            NSMouseInRect(mouseLocation, $0.frame, false)
+        }) ?? NSScreen.screens.first else {
             fatalError("No screen available")
         }
 
@@ -82,19 +87,48 @@ public struct NSWindowBuilder {
             defer: false
         )
 
-        let hostingView = NSHostingView(
-            rootView: HoverWindowContent(
-                window: window,
-                collapsedSize: collapsedSize,
-                expandedSize: size,
-                xOffset: xOffset,
-                yOffset: yOffset,
-                alignment: alignment,
-                content: content()
-            )
+        let trackingView = HoverTrackingView(
+            collapsedSize: collapsedSize,
+            expandedSize: size,
+            xOffset: xOffset,
+            yOffset: yOffset
         )
 
-        window.contentView = hostingView
+        trackingView.onHoverChanged = { [weak window] hovering in
+            guard let window else { return }
+
+            resize(
+                window: window,
+                screen: screen,
+                size: hovering ? size : collapsedSize,
+                xOffset: xOffset,
+                yOffset: yOffset
+            )
+        }
+
+        let hostingView = NSHostingView(
+            rootView: content()
+                .frame(
+                    width: size.width,
+                    height: size.height,
+                    alignment: alignment
+                )
+        )
+
+        trackingView.addSubview(hostingView)
+
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            hostingView.centerXAnchor.constraint(
+                equalTo: trackingView.centerXAnchor
+            ),
+            hostingView.centerYAnchor.constraint(
+                equalTo: trackingView.centerYAnchor
+            )
+        ])
+
+        window.contentView = trackingView
 
         window.isOpaque = isOpaque
         window.backgroundColor = backgroundColor
@@ -110,51 +144,14 @@ public struct NSWindowBuilder {
 
         return window
     }
-}
 
-private struct HoverWindowContent<Content: View>: View {
-
-    let window: NSWindow
-    let collapsedSize: CGSize
-    let expandedSize: CGSize
-    let xOffset: CGFloat
-    let yOffset: CGFloat
-    let alignment: Alignment
-    let content: Content
-
-    @State private var isHovered = false
-
-    var body: some View {
-        content
-            .frame(
-                width: isHovered
-                    ? expandedSize.width
-                    : collapsedSize.width,
-                height: isHovered
-                    ? expandedSize.height
-                    : collapsedSize.height,
-                alignment: alignment
-            )
-            .onHover { hovering in
-                guard hovering != isHovered else {
-                    return
-                }
-
-                isHovered = hovering
-
-                resizeWindow(
-                    to: hovering
-                        ? expandedSize
-                        : collapsedSize
-                )
-            }
-    }
-
-    private func resizeWindow(to size: CGSize) {
-        guard let screen = NSScreen.main else {
-            return
-        }
-
+    private func resize(
+        window: NSWindow,
+        screen: NSScreen,
+        size: CGSize,
+        xOffset: CGFloat,
+        yOffset: CGFloat
+    ) {
         let newX = screen.frame.midX
             - size.width / 2
             + xOffset
@@ -163,7 +160,7 @@ private struct HoverWindowContent<Content: View>: View {
             - size.height
             + yOffset
 
-        let newFrame = CGRect(
+        let frame = CGRect(
             x: newX,
             y: newY,
             width: size.width,
@@ -177,9 +174,93 @@ private struct HoverWindowContent<Content: View>: View {
             )
 
             window.animator().setFrame(
-                newFrame,
+                frame,
                 display: true
             )
         }
+    }
+}
+
+
+// MARK: - Hover Tracking
+
+private final class HoverTrackingView: NSView {
+
+    let collapsedSize: CGSize
+    let expandedSize: CGSize
+    let xOffset: CGFloat
+    let yOffset: CGFloat
+
+    var onHoverChanged: ((Bool) -> Void)?
+
+    private var trackingArea: NSTrackingArea?
+    private var isHovering = false
+
+    init(
+        collapsedSize: CGSize,
+        expandedSize: CGSize,
+        xOffset: CGFloat,
+        yOffset: CGFloat
+    ) {
+        self.collapsedSize = collapsedSize
+        self.expandedSize = expandedSize
+        self.xOffset = xOffset
+        self.yOffset = yOffset
+
+        super.init(frame: .zero)
+
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+
+        // IMPORTANT:
+        // Track only the collapsed-size area.
+        let rect = CGRect(
+            x: (bounds.width - collapsedSize.width) / 2,
+            y: (bounds.height - collapsedSize.height) / 2,
+            width: collapsedSize.width,
+            height: collapsedSize.height
+        )
+
+        let area = NSTrackingArea(
+            rect: rect,
+            options: [
+                .mouseEnteredAndExited,
+                .activeAlways
+            ],
+            owner: self,
+            userInfo: nil
+        )
+
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(
+        with event: NSEvent
+    ) {
+        guard !isHovering else { return }
+
+        isHovering = true
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(
+        with event: NSEvent
+    ) {
+        guard isHovering else { return }
+
+        isHovering = false
+        onHoverChanged?(false)
     }
 }
