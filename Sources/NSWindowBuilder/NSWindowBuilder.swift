@@ -73,7 +73,7 @@ public struct NSWindowBuilder {
                 )
         )
 
-        let window = NSWindow(
+        let window = OverlayWindow(
             contentRect: CGRect(
                 x: x,
                 y: y,
@@ -102,6 +102,16 @@ public struct NSWindowBuilder {
         window.orderFront(nil)
 
         return window
+    }
+}
+
+final class OverlayWindow: NSWindow {
+    override var canBecomeKey: Bool {
+        false
+    }
+
+    override var canBecomeMain: Bool {
+        false
     }
 }
 
