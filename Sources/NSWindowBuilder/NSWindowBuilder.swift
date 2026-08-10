@@ -64,7 +64,7 @@ public struct NSWindowBuilder {
             - size.height
             + yOffset
 
-        let hostingView = NSHostingView(
+        let hostingView = PassthroughHostingView(
             rootView: content()
                 .frame(
                     width: size.width,
@@ -102,5 +102,14 @@ public struct NSWindowBuilder {
         window.orderFront(nil)
 
         return window
+    }
+}
+
+final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hitView = super.hitTest(point) else { return nil }
+        
+        if hitView === self { return nil }
+        return hitView
     }
 }
