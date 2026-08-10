@@ -5,59 +5,78 @@ import SwiftUI
 private final class HoverableWindow: NSWindow {
 
     var onHover: ((Bool) -> Void)?
-    var expandedSize: CGSize = CGSize(width: 300, height: 60)
-    var collapsedSize: CGSize = CGSize(width: 250, height: 38)
+    var expandedSize: CGSize
+    var collapsedSize: CGSize
 
-    private var trackingArea: NSTrackingArea?
+    private var isHovered = false
+    private var mouseMonitor: Any?
 
-    func setupTrackingArea() {
-        guard let contentView else {
+    init(
+        contentRect: NSRect,
+        styleMask style: NSWindow.StyleMask,
+        backing backingStoreType: NSWindow.BackingStoreType,
+        defer flag: Bool,
+        expandedSize: CGSize,
+        collapsedSize: CGSize
+    ) {
+        self.expandedSize = expandedSize
+        self.collapsedSize = collapsedSize
+
+        super.init(
+            contentRect: contentRect,
+            styleMask: style,
+            backing: backingStoreType,
+            defer: flag
+        )
+
+        acceptsMouseMovedEvents = true
+
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.mouseMoved]
+        ) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.updateHover()
+            }
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        updateHover()
+    }
+
+    func updateHover() {
+        let mouseLocation = NSEvent.mouseLocation
+        let hovering = frame.contains(mouseLocation)
+
+        guard hovering != isHovered else {
             return
         }
 
-        if let trackingArea {
-            contentView.removeTrackingArea(trackingArea)
-        }
+        isHovered = hovering
+        onHover?(hovering)
 
-        let area = NSTrackingArea(
-            rect: .zero,
-            options: [
-                .mouseEnteredAndExited,
-                .activeAlways,
-                .inVisibleRect
-            ],
-            owner: self,
-            userInfo: nil
+        animateToSize(
+            hovering
+                ? expandedSize
+                : collapsedSize
         )
-
-        contentView.addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        onHover?(true)
-
-        animateToSize(expandedSize)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        onHover?(false)
-
-        animateToSize(collapsedSize)
     }
 
     private func animateToSize(_ newSize: CGSize) {
-        var frame = self.frame
+        let oldFrame = frame
 
-        let oldWidth = frame.width
-        let oldHeight = frame.height
+        let newFrame = NSRect(
+            x: oldFrame.midX - newSize.width / 2,
+            y: oldFrame.maxY - newSize.height,
+            width: newSize.width,
+            height: newSize.height
+        )
 
-        frame.size = newSize
-
-        frame.origin.x += (oldWidth - newSize.width) / 2
-        frame.origin.y += (oldHeight - newSize.height)
-
-        animator().setFrame(frame, display: true)
+        animator().setFrame(
+            newFrame,
+            display: true
+        )
     }
 }
 
@@ -82,8 +101,14 @@ public struct NSWindowBuilder {
     public var onHover: ((Bool) -> Void)?
 
     public init(
-        size: CGSize = CGSize(width: 300, height: 60),
-        collapsedSize: CGSize = CGSize(width: 250, height: 38),
+        size: CGSize = CGSize(
+            width: 300,
+            height: 60
+        ),
+        collapsedSize: CGSize = CGSize(
+            width: 250,
+            height: 38
+        ),
         alignment: Alignment = .center,
         xOffset: CGFloat = 0,
         yOffset: CGFloat = 0,
@@ -97,7 +122,9 @@ public struct NSWindowBuilder {
             .fullScreenAuxiliary,
             .stationary
         ],
-        styleMask: NSWindow.StyleMask = [.borderless],
+        styleMask: NSWindow.StyleMask = [
+            .borderless
+        ],
         onHover: ((Bool) -> Void)? = nil
     ) {
         self.size = size
@@ -149,7 +176,9 @@ public struct NSWindowBuilder {
             ),
             styleMask: styleMask,
             backing: .buffered,
-            defer: false
+            defer: false,
+            expandedSize: size,
+            collapsedSize: collapsedSize
         )
 
         window.contentView = hostingView
@@ -162,12 +191,8 @@ public struct NSWindowBuilder {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
-
         window.onHover = onHover
-        window.expandedSize = size
-        window.collapsedSize = collapsedSize
 
-        window.setupTrackingArea()
         window.orderFront(nil)
 
         return window
