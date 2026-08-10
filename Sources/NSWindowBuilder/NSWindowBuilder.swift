@@ -5,6 +5,8 @@ import SwiftUI
 private final class HoverableWindow: NSWindow {
 
     var onHover: ((Bool) -> Void)?
+    var expandedSize: CGSize = CGSize(width: 300, height: 60)
+    var collapsedSize: CGSize = CGSize(width: 250, height: 38)
 
     private var trackingArea: NSTrackingArea?
 
@@ -34,10 +36,28 @@ private final class HoverableWindow: NSWindow {
 
     override func mouseEntered(with event: NSEvent) {
         onHover?(true)
+
+        animateToSize(expandedSize)
     }
 
     override func mouseExited(with event: NSEvent) {
         onHover?(false)
+
+        animateToSize(collapsedSize)
+    }
+
+    private func animateToSize(_ newSize: CGSize) {
+        var frame = self.frame
+
+        let oldWidth = frame.width
+        let oldHeight = frame.height
+
+        frame.size = newSize
+
+        frame.origin.x += (oldWidth - newSize.width) / 2
+        frame.origin.y += (oldHeight - newSize.height)
+
+        animator().setFrame(frame, display: true)
     }
 }
 
@@ -45,6 +65,7 @@ private final class HoverableWindow: NSWindow {
 public struct NSWindowBuilder {
 
     public var size: CGSize
+    public var collapsedSize: CGSize
     public var alignment: Alignment
     public var xOffset: CGFloat
     public var yOffset: CGFloat
@@ -62,6 +83,7 @@ public struct NSWindowBuilder {
 
     public init(
         size: CGSize = CGSize(width: 300, height: 60),
+        collapsedSize: CGSize = CGSize(width: 250, height: 38),
         alignment: Alignment = .center,
         xOffset: CGFloat = 0,
         yOffset: CGFloat = 0,
@@ -79,6 +101,7 @@ public struct NSWindowBuilder {
         onHover: ((Bool) -> Void)? = nil
     ) {
         self.size = size
+        self.collapsedSize = collapsedSize
         self.alignment = alignment
         self.xOffset = xOffset
         self.yOffset = yOffset
@@ -101,11 +124,11 @@ public struct NSWindowBuilder {
         }
 
         let x = screen.frame.midX
-            - size.width / 2
+            - collapsedSize.width / 2
             + xOffset
 
         let y = screen.frame.maxY
-            - size.height
+            - collapsedSize.height
             + yOffset
 
         let hostingView = NSHostingView(
@@ -121,8 +144,8 @@ public struct NSWindowBuilder {
             contentRect: CGRect(
                 x: x,
                 y: y,
-                width: size.width,
-                height: size.height
+                width: collapsedSize.width,
+                height: collapsedSize.height
             ),
             styleMask: styleMask,
             backing: .buffered,
@@ -130,6 +153,7 @@ public struct NSWindowBuilder {
         )
 
         window.contentView = hostingView
+
         window.isOpaque = isOpaque
         window.backgroundColor = backgroundColor
         window.level = level
@@ -138,7 +162,10 @@ public struct NSWindowBuilder {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = hasShadow
+
         window.onHover = onHover
+        window.expandedSize = size
+        window.collapsedSize = collapsedSize
 
         window.setupTrackingArea()
         window.orderFront(nil)
